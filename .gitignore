@@ -1,0 +1,16 @@
+# Archivos locales de Visual Studio y compilación
+.vs/
+[Bb]in/
+[Oo]bj/
+*.user
+*.suo
+*.log
+
+# Datos operativos, clientes y configuración privada
+EdenPOS/Base de datos/*
+!EdenPOS/Base de datos/INFORMACION.txt
+**/BaseDatos/
+**/Data/
+*.edenbackup
+.env
+.env.*

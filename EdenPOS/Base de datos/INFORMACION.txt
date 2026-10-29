@@ -1,0 +1,14 @@
+BASE DE DATOS LOCAL DE EDÉN POS
+
+Esta es la única carpeta de datos utilizada por los ejecutables situados en la carpeta Ejecutable.
+
+Los archivos JSON son ficheros de texto que almacenan:
+- Configuración
+- Catálogo e inventario
+- Recibos
+- Clientes
+- Tickets guardados y candados
+- Turnos y movimientos de caja
+
+No edite, mueva ni elimine estos archivos mientras Edén POS esté abierto.
+Para hacer una copia manual, cierre el programa y copie esta carpeta completa.

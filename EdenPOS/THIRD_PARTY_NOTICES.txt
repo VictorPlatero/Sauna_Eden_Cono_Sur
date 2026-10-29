@@ -1,0 +1,16 @@
+THIRD-PARTY NOTICES
+===================
+
+Twemoji graphics
+----------------
+Copyright 2020 Twitter, Inc. and other contributors.
+
+The catalog graphics in Assets/Catalog are unmodified Twemoji PNG assets
+(renamed for clarity) from the jdecked/twemoji repository.
+
+Graphics license: Creative Commons Attribution 4.0 International (CC BY 4.0)
+https://creativecommons.org/licenses/by/4.0/
+
+Source and license notice:
+https://github.com/jdecked/twemoji
+https://github.com/jdecked/twemoji/blob/main/LICENSE-GRAPHICS
