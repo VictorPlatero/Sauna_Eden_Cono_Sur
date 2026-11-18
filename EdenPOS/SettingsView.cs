@@ -160,9 +160,12 @@ namespace EdenPOS
             store.Text = settings.StoreName;
             employee.Text = AppSession.UserName + " — " + AppSession.RoleName;
             currency.Text = settings.CurrencySymbol;
-            dataPath.Text = AppData.DataDirectory;
+            dataPath.Text = AppData.UsesSupabase ? "PostgreSQL · Supabase" : AppData.DataDirectory;
             portableButton.Text = AppData.IsPortableMode ? "DESACTIVAR PORTABLE" : "ACTIVAR PORTABLE";
-            storageMode.Text = AppData.IsPortableMode
+            portableButton.Enabled = !AppData.UsesSupabase;
+            storageMode.Text = AppData.UsesSupabase
+                ? "Supabase guarda los datos operativos. Las imágenes personalizadas y el token de DNI se conservan en este equipo."
+                : AppData.IsPortableMode
                 ? "Modo portable activo: datos e imágenes viajan junto al ejecutable. El token DNI debe configurarse nuevamente en otra cuenta de Windows."
                 : "Modo local: datos protegidos en el perfil de Windows. Use Exportar/Importar para trasladarlos a otra computadora.";
             dniEnabled.Checked = settings.DniLookupEnabled;

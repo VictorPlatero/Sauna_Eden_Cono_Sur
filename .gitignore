@@ -9,8 +9,14 @@
 # Datos operativos, clientes y configuración privada
 EdenPOS/Base de datos/*
 !EdenPOS/Base de datos/INFORMACION.txt
+!EdenPOS/Base de datos/001_edenpos_supabase.sql
+!EdenPOS/Base de datos/002_edenpos_desktop.sql
+!EdenPOS/Base de datos/verificar_edenpos_supabase.sql
 **/BaseDatos/
 **/Data/
 *.edenbackup
 .env
 .env.*
+supabase.protected
+dni-token.protected
+*.pending

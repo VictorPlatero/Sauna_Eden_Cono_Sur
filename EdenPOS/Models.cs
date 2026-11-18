@@ -35,6 +35,7 @@ namespace EdenPOS
 
     public sealed class Receipt
     {
+        public string ShiftId { get; set; }
         public string Id { get; set; }
         public int Number { get; set; }
         public DateTime CreatedAt { get; set; }

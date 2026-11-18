@@ -6,6 +6,7 @@ using System.Globalization;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Web.Script.Serialization;
@@ -16,6 +17,51 @@ namespace EdenPOS
     {
         private static readonly object Sync = new object();
         private static readonly JavaScriptSerializer Json = new JavaScriptSerializer { MaxJsonLength = int.MaxValue };
+
+        private static readonly ConditionalWeakTable<List<Product>, CatalogVersion> CatalogVersions =
+            new ConditionalWeakTable<List<Product>, CatalogVersion>();
+        private sealed class CatalogVersion
+        {
+            internal string Contents { get; }
+            internal CatalogVersion(string contents) { Contents = contents; }
+        }
+
+        private static SupabaseStore cloud;
+        [ThreadStatic] private static SupabaseStore.Session cloudSession;
+
+        internal static bool UsesSupabase { get { return cloud != null; } }
+
+        private sealed class CloudOperation : IDisposable
+        {
+            private readonly SupabaseStore.Session session;
+
+            internal CloudOperation(bool write)
+            {
+                session = cloud.Open(write);
+                cloudSession = session;
+            }
+
+            public void Dispose()
+            {
+                if (cloudSession != session) return;
+                cloudSession = null;
+                session.Dispose();
+            }
+        }
+
+        private static CloudOperation BeginCloudOperation(bool write = true)
+        {
+            return cloud == null || cloudSession != null ? null : new CloudOperation(write);
+        }
+
+        private static void CommitCloudOperation()
+        {
+            var session = cloudSession;
+            if (session == null) return;
+            session.Commit();
+            cloudSession = null;
+            session.Dispose();
+        }
 
         public static string DataDirectory
         {
@@ -56,6 +102,12 @@ namespace EdenPOS
         public static void Initialize()
         {
             Directory.CreateDirectory(DataDirectory);
+            cloud = SupabaseStore.FromConfiguration();
+            if (cloud != null)
+            {
+                InitializeCloud(Environment.GetEnvironmentVariable("EDENPOS_IMPORT_LOCAL") == "1");
+                return;
+            }
             if (!File.Exists(PathFor("settings"))) Save("settings", CreateDefaultSettings());
             if (!File.Exists(PathFor("catalog"))) Save("catalog", CreateDefaultProducts());
             if (!File.Exists(PathFor("receipts"))) Save("receipts", new List<Receipt>());
@@ -67,14 +119,81 @@ namespace EdenPOS
             MigrateDefaults();
         }
 
+        internal static void InitializeSupabase(string connectionString, bool import)
+        {
+            Directory.CreateDirectory(DataDirectory);
+            cloud = new SupabaseStore(connectionString);
+            try { InitializeCloud(import); }
+            catch
+            {
+                cloud = null;
+                throw;
+            }
+        }
+
+        private static void InitializeCloud(bool import)
+        {
+            using (BeginCloudOperation())
+            {
+                if (!cloudSession.HasSettings()) SeedCloudDatabase(import);
+                MigrateDefaults();
+                CommitCloudOperation();
+            }
+        }
+
+        private static void SeedCloudDatabase(bool import)
+        {
+            if (cloudSession.HasBusinessData())
+                throw new InvalidOperationException("La base contiene datos sin configuración. Revise la instalación de EdenPOS en Supabase.");
+            if (!import)
+                throw new InvalidOperationException("La base está vacía. Autorice la carga inicial de los archivos locales en la configuración de Supabase.");
+
+            var localSettings = ReadSeed("settings", CreateDefaultSettings);
+            localSettings.DniApiTokenProtected = "";
+            Save("settings", localSettings);
+            Save("catalog", ReadSeed("catalog", CreateDefaultProducts));
+            Save("customers", ReadSeed("customers", () => new List<Customer>()));
+            Save("shifts", ReadSeed("shifts", () => new List<Shift>()));
+            Save("receipts", ReadSeed("receipts", () => new List<Receipt>()));
+            Save("saved_tickets", ReadSeed("saved_tickets", () => new List<SavedTicket>()));
+            Save("cash_movements", ReadSeed("cash_movements", () => new List<CashMovement>()));
+            Save("inventory_movements", ReadSeed("inventory_movements", () => new List<InventoryMovement>()));
+        }
+
+        private static T ReadSeed<T>(string name, Func<T> fallback)
+        {
+            var path = PathFor(name);
+            if (!File.Exists(path)) return fallback();
+            var value = Json.Deserialize<T>(File.ReadAllText(path, Encoding.UTF8));
+            if (value == null) throw new InvalidDataException("Archivo de migración vacío: " + name + ".json");
+            return value;
+        }
+
         public static AppSettings Settings
         {
-            get { return Load("settings", CreateDefaultSettings); }
+            get
+            {
+                var settings = Load("settings", CreateDefaultSettings);
+                if (cloud != null)
+                {
+                    var path = Path.Combine(DataDirectory, "dni-token.protected");
+                    settings.DniApiTokenProtected = File.Exists(path)
+                        ? File.ReadAllText(path, Encoding.UTF8)
+                        : ReadSeed("settings", CreateDefaultSettings).DniApiTokenProtected;
+                }
+                return settings;
+            }
         }
 
         public static List<Product> Products
         {
-            get { return Load("catalog", CreateDefaultProducts); }
+            get
+            {
+                var products = Load("catalog", CreateDefaultProducts);
+                if (cloud != null && cloudSession == null)
+                    CatalogVersions.Add(products, new CatalogVersion(Json.Serialize(products)));
+                return products;
+            }
         }
 
         public static List<Receipt> Receipts
@@ -123,7 +242,18 @@ namespace EdenPOS
 
         public static void SaveSettings(AppSettings value)
         {
-            Save("settings", value);
+            using var operation = BeginCloudOperation();
+            if (cloud != null)
+            {
+                var current = Settings;
+                current.StoreName = value.StoreName;
+                current.CurrencySymbol = value.CurrencySymbol;
+                current.DniLookupEnabled = value.DniLookupEnabled;
+                Save("settings", current);
+                CommitCloudOperation();
+                File.WriteAllText(Path.Combine(DataDirectory, "dni-token.protected"), value.DniApiTokenProtected ?? "", Encoding.UTF8);
+            }
+            else Save("settings", value);
             RaiseChanged();
         }
 
@@ -135,6 +265,7 @@ namespace EdenPOS
 
         public static AppUser SaveUser(string id, string name, string pin, string role)
         {
+            using var operation = BeginCloudOperation();
             lock (Sync)
             {
                 if (!Validation.IsValidRequiredText(name, 3, 60))
@@ -179,6 +310,7 @@ namespace EdenPOS
 
         public static void SetUserActive(string id, bool active)
         {
+            using var operation = BeginCloudOperation();
             lock (Sync)
             {
                 var settings = Settings;
@@ -199,6 +331,7 @@ namespace EdenPOS
 
         public static void DeleteUser(string id)
         {
+            using var operation = BeginCloudOperation();
             lock (Sync)
             {
                 var settings = Settings;
@@ -218,6 +351,11 @@ namespace EdenPOS
 
         public static void SaveProducts(List<Product> value)
         {
+            using var operation = BeginCloudOperation();
+            if (cloud != null &&
+                (!CatalogVersions.TryGetValue(value, out var original) ||
+                 original.Contents != Json.Serialize(Products)))
+                throw new InvalidOperationException("El catálogo cambió en otra caja. Actualice el inventario antes de guardar.");
             Save("catalog", value);
             RaiseChanged();
         }
@@ -229,6 +367,7 @@ namespace EdenPOS
 
         public static void AddInventoryEntry(string productId, string optionId, int quantity, string note)
         {
+            using var operation = BeginCloudOperation();
             if (quantity <= 0 || quantity > 1000000) throw new ArgumentException("La entrada debe ser mayor que cero.");
             lock (Sync)
             {
@@ -262,6 +401,7 @@ namespace EdenPOS
 
         public static void DeleteProduct(string productId)
         {
+            using var operation = BeginCloudOperation();
             lock (Sync)
             {
                 var products = Products;
@@ -275,10 +415,21 @@ namespace EdenPOS
             }
         }
 
-        public static Receipt AddReceipt(List<ReceiptLine> lines, string customer, string customerDni, string method, decimal received, decimal cashAmount = -1m, decimal yapeAmount = -1m)
+        public static Receipt AddReceipt(List<ReceiptLine> lines, string customer, string customerDni, string method, decimal received, decimal cashAmount = -1m, decimal yapeAmount = -1m, string savedTicketId = null)
         {
+            using var operation = BeginCloudOperation();
             lock (Sync)
             {
+                var shift = OpenShift;
+                if (cloud != null && shift == null)
+                    throw new InvalidOperationException("Abra un turno antes de cobrar la venta.");
+                List<SavedTicket> savedTickets = null;
+                if (!string.IsNullOrWhiteSpace(savedTicketId))
+                {
+                    savedTickets = SavedTickets;
+                    if (savedTickets.RemoveAll(x => x.Id == savedTicketId) == 0)
+                        throw new InvalidOperationException("El ticket ya se cobró o se eliminó en otra caja.");
+                }
                 var settings = Settings;
                 var receipts = Receipts;
                 var products = Products;
@@ -297,6 +448,7 @@ namespace EdenPOS
                 {
                     Id = Guid.NewGuid().ToString("N"),
                     Number = settings.NextReceiptNumber,
+                    ShiftId = shift?.Id,
                     CreatedAt = DateTime.Now,
                     Employee = string.IsNullOrWhiteSpace(AppSession.UserName) ? settings.EmployeeName : AppSession.UserName,
                     CustomerName = string.IsNullOrWhiteSpace(customer) ? "Público general" : customer.Trim(),
@@ -338,6 +490,7 @@ namespace EdenPOS
                         movements.Add(NewInventoryMovement(product, "Venta", line.Quantity, previous, "Venta #" + receipt.Number, receipt.Id));
                     }
                 }
+                if (savedTickets != null) Save("saved_tickets", savedTickets);
                 settings.NextReceiptNumber++;
                 Save("receipts", receipts);
                 Save("settings", settings);
@@ -362,6 +515,7 @@ namespace EdenPOS
             int adultCount = 0,
             int childCount = 0)
         {
+            using var operation = BeginCloudOperation();
             if (lines == null || lines.Count == 0) throw new InvalidOperationException("No hay artículos para guardar.");
             var selectedLockers = (lockerNumbers ?? new int[0]).Distinct().OrderBy(x => x).ToList();
             if (selectedLockers.Count == 0) throw new ArgumentException("Seleccione al menos una llave.");
@@ -406,6 +560,7 @@ namespace EdenPOS
             int adultCount,
             int childCount)
         {
+            using var operation = BeginCloudOperation();
             if (lines == null || lines.Count == 0) throw new InvalidOperationException("No hay artículos para guardar.");
             var selectedLockers = (lockerNumbers ?? new int[0]).Distinct().OrderBy(x => x).ToList();
             if (selectedLockers.Count == 0) throw new ArgumentException("Seleccione al menos una llave.");
@@ -465,6 +620,7 @@ namespace EdenPOS
 
         public static void UpdateSavedTicketLockers(string id, IEnumerable<int> lockerNumbers)
         {
+            using var operation = BeginCloudOperation();
             lock (Sync)
             {
                 var selectedLockers = (lockerNumbers ?? new int[0]).Distinct().OrderBy(x => x).ToList();
@@ -489,6 +645,7 @@ namespace EdenPOS
 
         public static void DeleteSavedTicket(string id)
         {
+            using var operation = BeginCloudOperation();
             var tickets = SavedTickets;
             tickets.RemoveAll(x => x.Id == id);
             Save("saved_tickets", tickets);
@@ -516,6 +673,7 @@ namespace EdenPOS
 
         public static Customer SaveCustomer(string dni, string fullName, string source)
         {
+            using var operation = BeginCloudOperation();
             var normalized = Validation.NormalizeDni(dni);
             if (!Validation.IsValidDni(normalized)) throw new ArgumentException("El DNI debe tener 8 dígitos.");
             if (!Validation.IsValidPersonName(fullName)) throw new ArgumentException("El nombre completo no es válido.");
@@ -564,6 +722,7 @@ namespace EdenPOS
 
         public static void RefundReceipt(Receipt receipt, string reason)
         {
+            using var operation = BeginCloudOperation();
             lock (Sync)
             {
                 var receipts = Receipts;
@@ -632,6 +791,7 @@ namespace EdenPOS
 
         public static Shift OpenNewShift(decimal openingAmount)
         {
+            using var operation = BeginCloudOperation();
             lock (Sync)
             {
                 if (OpenShift != null) throw new InvalidOperationException("Ya existe un turno abierto.");
@@ -657,6 +817,7 @@ namespace EdenPOS
 
         public static void CloseShift(string id, decimal closingAmount)
         {
+            using var operation = BeginCloudOperation();
             var shifts = Shifts;
             var shift = shifts.FirstOrDefault(x => x.Id == id && x.IsOpen);
             if (shift == null) return;
@@ -670,6 +831,7 @@ namespace EdenPOS
 
         public static CashMovement AddCashMovement(string type, decimal amount, string comment)
         {
+            using var operation = BeginCloudOperation();
             var shift = OpenShift;
             if (shift == null) throw new InvalidOperationException("Abra un turno antes de registrar movimientos de tesorería.");
             var movement = new CashMovement
@@ -734,6 +896,7 @@ namespace EdenPOS
 
         public static void SetPortableMode(bool enabled)
         {
+            if (cloud != null) throw new InvalidOperationException("El modo portable requiere almacenamiento local.");
             if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("EDENPOS_DATA_PATH")))
                 throw new InvalidOperationException("No se puede cambiar el modo portable mientras EDENPOS_DATA_PATH está configurado.");
             var marker = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "portable.mode");
@@ -761,7 +924,8 @@ namespace EdenPOS
         public static void ExportBackup(string destinationPath)
         {
             if (string.IsNullOrWhiteSpace(destinationPath)) throw new ArgumentException("Seleccione un archivo de destino.");
-            Initialize();
+            if (cloud == null) Initialize();
+            using var snapshot = BeginCloudOperation(false);
             var destination = Path.GetFullPath(destinationPath);
             var dataRoot = Path.GetFullPath(DataDirectory).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
             if (destination.StartsWith(dataRoot, StringComparison.OrdinalIgnoreCase))
@@ -775,8 +939,21 @@ namespace EdenPOS
                     var relative = source.Substring(dataRoot.Length).Replace('\\', '/');
                     if (relative.Equals("settings.json", StringComparison.OrdinalIgnoreCase) ||
                         relative.Equals("errors.log", StringComparison.OrdinalIgnoreCase) ||
-                        relative.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase)) continue;
+                        relative.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase) ||
+                        relative.Equals("dni-token.protected", StringComparison.OrdinalIgnoreCase) ||
+                        (cloud != null && !relative.StartsWith("Images/", StringComparison.OrdinalIgnoreCase))) continue;
                     archive.CreateEntryFromFile(source, relative, CompressionLevel.Optimal);
+                }
+
+                if (cloud != null)
+                {
+                    WriteZipText(archive, "catalog.json", PrettyJson(Json.Serialize(Products)));
+                    WriteZipText(archive, "receipts.json", PrettyJson(Json.Serialize(Receipts)));
+                    WriteZipText(archive, "saved_tickets.json", PrettyJson(Json.Serialize(SavedTickets)));
+                    WriteZipText(archive, "customers.json", PrettyJson(Json.Serialize(Customers)));
+                    WriteZipText(archive, "shifts.json", PrettyJson(Json.Serialize(Shifts)));
+                    WriteZipText(archive, "cash_movements.json", PrettyJson(Json.Serialize(CashMovements)));
+                    WriteZipText(archive, "inventory_movements.json", PrettyJson(Json.Serialize(InventoryMovements)));
                 }
 
                 var settings = Settings;
@@ -790,6 +967,7 @@ namespace EdenPOS
                     DniLookupEnabled = false,
                     DniApiTokenProtected = "",
                     InventorySchemaVersion = settings.InventorySchemaVersion,
+                    CatalogSchemaVersion = settings.CatalogSchemaVersion,
                     SecuritySchemaVersion = settings.SecuritySchemaVersion,
                     Users = (settings.Users ?? new List<AppUser>()).Select(x => new AppUser
                     {
@@ -814,6 +992,9 @@ namespace EdenPOS
 
         public static void ImportBackup(string sourcePath)
         {
+            if (cloud != null)
+                throw new InvalidOperationException("En modo Supabase, restaure la base desde Supabase.");
+
             if (!File.Exists(sourcePath)) throw new FileNotFoundException("No se encontró la copia seleccionada.", sourcePath);
             var currentSettings = Settings;
             var currentToken = currentSettings.DniApiTokenProtected;
@@ -875,6 +1056,12 @@ namespace EdenPOS
 
         private static T Load<T>(string name, Func<T> fallback)
         {
+            if (cloud != null)
+            {
+                using (BeginCloudOperation(false))
+                    return cloudSession.Read<T>(name);
+            }
+
             lock (Sync)
             {
                 try
@@ -896,6 +1083,13 @@ namespace EdenPOS
 
         private static void Save<T>(string name, T value)
         {
+            if (cloud != null)
+            {
+                if (cloudSession == null) throw new InvalidOperationException("No hay una transacción de EdenPOS activa.");
+                cloudSession.Write(name, value);
+                return;
+            }
+
             lock (Sync)
             {
                 Directory.CreateDirectory(DataDirectory);
@@ -910,8 +1104,20 @@ namespace EdenPOS
 
         private static void RaiseChanged()
         {
+            CommitCloudOperation();
             var handler = DataChanged;
-            if (handler != null) handler(null, EventArgs.Empty);
+            if (handler == null) return;
+            if (cloud == null)
+            {
+                handler(null, EventArgs.Empty);
+                return;
+            }
+            // UI refresh errors must not turn a committed transaction into a failed sale.
+            foreach (EventHandler subscriber in handler.GetInvocationList())
+            {
+                try { subscriber(null, EventArgs.Empty); }
+                catch (Exception ex) { LogError(ex, "Actualizar pantalla después de guardar en Supabase"); }
+            }
         }
 
         private static void MigrateDefaults()

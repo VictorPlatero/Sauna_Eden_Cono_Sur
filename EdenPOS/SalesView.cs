@@ -662,7 +662,7 @@ namespace EdenPOS
                 try
                 {
                     chargeButton.Enabled = false;
-                    receipt = AppData.AddReceipt(cart, customerBox.Text, dniBox.Text, dialog.PaymentMethod, dialog.AmountReceived, dialog.CashAmount, dialog.YapeAmount);
+                    receipt = AppData.AddReceipt(cart, customerBox.Text, dniBox.Text, dialog.PaymentMethod, dialog.AmountReceived, dialog.CashAmount, dialog.YapeAmount, AppData.UsesSupabase ? loadedSavedTicketId : null);
                 }
                 catch (Exception ex) when (ex is InvalidOperationException || ex is ArgumentException)
                 {
@@ -673,14 +673,14 @@ namespace EdenPOS
                 catch (Exception ex)
                 {
                     AppData.LogError(ex, "Registrar cobro");
-                    MessageBox.Show("No se pudo registrar el cobro. Revise que la carpeta de datos tenga espacio y permiso de escritura.", "No se pudo cobrar", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                    MessageBox.Show("No se pudo confirmar el cobro. Revise el historial de recibos y la conexión antes de volver a cobrar.", "No se pudo cobrar", MessageBoxButtons.OK, MessageBoxIcon.Error);
                     RenderCart();
                     return;
                 }
                 var change = dialog.PaymentMethod == "Efectivo" ? Math.Max(0m, dialog.AmountReceived - receipt.Total) : 0m;
                 var completedSavedTicketId = loadedSavedTicketId;
                 ClearCurrentTicket();
-                if (!string.IsNullOrWhiteSpace(completedSavedTicketId))
+                if (!AppData.UsesSupabase && !string.IsNullOrWhiteSpace(completedSavedTicketId))
                 {
                     try { AppData.DeleteSavedTicket(completedSavedTicketId); }
                     catch (Exception ex)

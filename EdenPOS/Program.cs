@@ -8,7 +8,7 @@ namespace EdenPOS
     internal static class Program
     {
         [STAThread]
-        private static void Main()
+        private static void Main(string[] args)
         {
             var culture = new CultureInfo("es-PE");
             Thread.CurrentThread.CurrentCulture = culture;
@@ -19,7 +19,11 @@ namespace EdenPOS
 
             try
             {
-                AppData.Initialize();
+                if (Array.Exists(args, arg => arg == "--configurar-supabase"))
+                {
+                    if (!SupabaseSetup.Show()) return;
+                }
+                else AppData.Initialize();
                 Application.ThreadException += (s, e) =>
                 {
                     AppData.LogError(e.Exception, "Error no controlado de interfaz");

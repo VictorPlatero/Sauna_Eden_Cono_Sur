@@ -11,7 +11,7 @@
     <ApplicationIcon>Assets\EdenPOS.ico</ApplicationIcon>
     <PlatformTarget>AnyCPU</PlatformTarget>
     <Prefer32Bit>false</Prefer32Bit>
-    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationManifest>app.manifest.xml</ApplicationManifest>
     <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
     <Deterministic>true</Deterministic>
   </PropertyGroup>
@@ -26,6 +26,7 @@
 
   <ItemGroup>
     <None Include="Assets\EdenPOS.ico" />
+    <None Update="Assets\supabase-ca.crt" CopyToOutputDirectory="PreserveNewest" />
     <None Remove="Assets\EdenPOS-Login-v2.png" />
     <Content Include="Assets\EdenPOS-Login-v2.png">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
@@ -34,5 +35,9 @@
     <Content Include="Assets\Catalog\*.png">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </Content>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Npgsql" Version="8.0.9" />
   </ItemGroup>
 </Project>

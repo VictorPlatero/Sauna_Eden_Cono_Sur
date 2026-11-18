@@ -1,6 +1,6 @@
 # Edén POS
 
-Aplicación de punto de venta táctil para Windows, inspirada en el flujo de las capturas proporcionadas. Está desarrollada en **C# WinForms para .NET Framework 4.8** y no necesita base de datos: toda la información se conserva en ficheros JSON locales.
+Aplicación de punto de venta táctil para Windows, inspirada en el flujo de las capturas proporcionadas. Está desarrollada en **C# WinForms para .NET Framework 4.8** y admite PostgreSQL en Supabase o almacenamiento local en archivos JSON.
 
 El ejecutable y la ventana principal utilizan el logotipo circular del negocio como icono oficial de Edén POS.
 
@@ -45,6 +45,19 @@ También puede ejecutar directamente `Ejecutable\EdenPOS.exe` en un equipo Windo
 
 La compilación usa **Any CPU**, por lo que funciona como aplicación de 32 bits en Windows x86 y de 64 bits en Windows x64. Se recomienda Windows 10 u 11 con [Microsoft .NET Framework 4.8](https://dotnet.microsoft.com/download/dotnet-framework/net48).
 
+## Conectar el ejecutable a Supabase
+
+En la carpeta `Ejecutable`, abre `Configurar Supabase.cmd` una vez con tu cuenta de Windows. El asistente apunta al proyecto EdenPOS de VictorPlatero’s Org y usa el certificado CA de Supabase incluido en `Assets`.
+
+1. Introduce la contraseña de PostgreSQL de [Database Settings](https://supabase.com/dashboard/project/qnnfetkrqaaotkqsfivp/database/settings). Si no la conservaste, el botón **Reset password** te permite asignar otra.
+2. En la primera caja, marca **Cargar los datos locales de esta caja si la base está vacía** para importar el catálogo, los usuarios, los clientes, el inventario y el historial de ventas y caja. Usa la caja que tenga los datos vigentes. Las cajas siguientes leerán la base ya inicializada.
+3. Pulsa **Conectar**. El asistente crea un usuario de PostgreSQL para esa caja con acceso a las tablas de EdenPOS. Windows protege su credencial en el perfil de esa cuenta. Las aperturas posteriores de `EdenPOS.exe` usan la conexión guardada.
+4. En **Configuración** debe aparecer **PostgreSQL · Supabase**.
+
+La conexión verifica el certificado del Session pooler. El importador escribe los datos en las tablas del esquema `edenpos` en una transacción. Los archivos JSON originales siguen en la carpeta de datos. Las imágenes personalizadas y el token de consulta de DNI son locales por equipo. En modo Supabase, la opción de exportar crea una copia de los datos PostgreSQL. La restauración se administra en Supabase.
+
+Para otro proyecto, instala las migraciones `001_edenpos_supabase.sql` y `002_edenpos_desktop.sql`, en ese orden. Una instalación administrada puede configurar `EDENPOS_POSTGRES_CONNECTION` con una cadena Npgsql y el certificado CA correspondiente. Usa una cuenta PostgreSQL con acceso limitado al esquema `edenpos`.
+
 ## Primer inicio de sesión
 
 - Usuario inicial: `DUEÑA`
@@ -69,7 +82,7 @@ Ubicación predeterminada:
 
 `%LOCALAPPDATA%\EdenPOS\Data`
 
-La distribución incluida en `Ejecutable` contiene un archivo `data.path` y utiliza exclusivamente la carpeta `Base de datos` situada en la raíz del proyecto. El archivo permite definir una ruta relativa sin fijar el nombre del usuario ni la letra del disco.
+La distribución incluida en `Ejecutable` contiene un archivo `data.path` y usa la carpeta `Base de datos` en modo local situada en la raíz del proyecto. El archivo permite definir una ruta relativa sin fijar el nombre del usuario ni la letra del disco.
 
 La pantalla **Configuración** incluye un botón para abrir esa carpeta. Para pruebas o instalaciones especiales puede cambiarse la ubicación mediante la variable de entorno `EDENPOS_DATA_PATH`.
 
