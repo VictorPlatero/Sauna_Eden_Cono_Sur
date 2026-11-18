@@ -16,6 +16,7 @@ namespace EdenPOS
         private readonly Dictionary<string, Button> navButtons = new Dictionary<string, Button>();
         private readonly Dictionary<string, Control> views = new Dictionary<string, Control>();
         private string currentKey;
+        private int displayedRevision;
         public bool LogoutRequested { get; private set; }
 
         public MainForm()
@@ -150,6 +151,21 @@ namespace EdenPOS
 
             AppData.DataChanged += OnDataChanged;
             FormClosed += (s, e) => AppData.DataChanged -= OnDataChanged;
+            if (AppData.UsesSupabase)
+            {
+                displayedRevision = AppData.SupabaseRevision;
+                var liveRefresh = new Timer { Interval = 300 };
+                liveRefresh.Tick += (s, e) =>
+                {
+                    if (Form.ActiveForm != this || currentKey == "settings") return;
+                    var revision = AppData.SupabaseRevision;
+                    if (revision == displayedRevision) return;
+                    UpdateCurrentView();
+                    displayedRevision = revision;
+                };
+                Disposed += (s, e) => liveRefresh.Dispose();
+                liveRefresh.Start();
+            }
             KeyDown += MainForm_KeyDown;
             UpdateIdentity();
             updateResponsiveLayout();

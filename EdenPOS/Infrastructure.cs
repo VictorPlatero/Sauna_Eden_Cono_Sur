@@ -30,6 +30,7 @@ namespace EdenPOS
         [ThreadStatic] private static SupabaseSync.Operation cloudSession;
 
         internal static bool UsesSupabase { get { return cloud != null; } }
+        internal static int SupabaseRevision { get { return cloud?.RemoteRevision ?? 0; } }
         internal static string SupabaseStatus { get { return cloud?.Status; } }
 
         internal static void CloseSupabase()

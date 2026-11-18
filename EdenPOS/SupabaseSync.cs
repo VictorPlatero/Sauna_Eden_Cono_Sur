@@ -6,6 +6,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace EdenPOS
 {
@@ -25,6 +26,9 @@ namespace EdenPOS
         private readonly FileStream instanceLock;
         private readonly Timer timer;
         private State current;
+        private readonly CancellationTokenSource stopListener = new CancellationTokenSource();
+        private Task listener;
+        private int remoteRevision;
         private int syncing;
         private volatile bool disposed;
         private bool started;
@@ -96,7 +100,35 @@ namespace EdenPOS
             lock (gate)
             {
                 started = true;
+                listener = Task.Run(Listen);
                 timer.Change(0, RetryIntervalMilliseconds);
+            }
+        }
+
+        internal int RemoteRevision { get { return Volatile.Read(ref remoteRevision); } }
+
+        private async Task Listen()
+        {
+            var token = stopListener.Token;
+            try
+            {
+                while (!token.IsCancellationRequested)
+                {
+                    try { await store.ListenForChanges(RequestSync, token); }
+                    catch (Exception) when (!token.IsCancellationRequested)
+                    {
+                        await Task.Delay(RetryIntervalMilliseconds, token);
+                    }
+                }
+            }
+            catch (Exception) when (token.IsCancellationRequested) { }
+        }
+
+        private void RequestSync()
+        {
+            lock (gate)
+            {
+                if (!disposed) timer.Change(100, RetryIntervalMilliseconds);
             }
         }
 
@@ -153,7 +185,12 @@ namespace EdenPOS
 
         private void Synchronize()
         {
-            if (disposed || Interlocked.Exchange(ref syncing, 1) != 0) return;
+            if (disposed) return;
+            if (Interlocked.Exchange(ref syncing, 1) != 0)
+            {
+                RequestSync();
+                return;
+            }
             try
             {
                 State snapshot;
@@ -180,11 +217,14 @@ namespace EdenPOS
                         {
                             if (!ReferenceEquals(current, snapshot)) return;
                             if (snapshot.Pending != null || baseline != remoteHash)
+                            {
                                 SaveState(new State
                                 {
                                     Database = snapshot.Database, Data = remote, Published = Fingerprints(remote),
                                     RemoteFingerprint = remoteHash
                                 });
+                                Interlocked.Increment(ref remoteRevision);
+                            }
                             status = "Supabase al día";
                         }
                         return;
@@ -272,7 +312,10 @@ namespace EdenPOS
 
         public void Dispose()
         {
-            disposed = true;
+            lock (gate) disposed = true;
+            stopListener.Cancel();
+            listener?.GetAwaiter().GetResult();
+            stopListener.Dispose();
             using (var stopped = new ManualResetEvent(false))
             {
                 if (timer.Dispose(stopped)) stopped.WaitOne();

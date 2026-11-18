@@ -6,6 +6,8 @@ using System.Net.Security;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
 using Npgsql;
 using NpgsqlTypes;
 
@@ -87,6 +89,19 @@ namespace EdenPOS
                 });
             }
             return builder.Build();
+        }
+
+        internal async Task ListenForChanges(Action refresh, CancellationToken token)
+        {
+            using (var connection = await dataSource.OpenConnectionAsync(token))
+            using (var listen = new NpgsqlCommand("listen edenpos_cambios", connection))
+            {
+                connection.Notification += (sender, notification) => refresh();
+                await listen.ExecuteNonQueryAsync(token);
+                refresh();
+                while (!token.IsCancellationRequested)
+                    connection.Wait(1000);
+            }
         }
 
         internal Session Open(bool write) { return new Session(dataSource, write); }
