@@ -56,6 +56,7 @@ namespace EdenPOS
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error);
             }
+            finally { AppData.CloseSupabase(); }
         }
     }
 }

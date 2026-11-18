@@ -167,6 +167,7 @@ namespace EdenPOS
                     }
                     catch
                     {
+                        AppData.CloseSupabase();
                         NpgsqlConnection.ClearAllPools();
                         try
                         {

@@ -15,6 +15,7 @@ namespace EdenPOS
         private readonly Label dataPath;
         private readonly Label storageMode;
         private readonly Button portableButton;
+        private readonly Timer syncStatusTimer = new Timer { Interval = 1000 };
         private readonly CheckBox dniEnabled;
         private readonly TextBox dniToken;
         private readonly Label dniStatus;
@@ -152,6 +153,17 @@ namespace EdenPOS
             host.SizeChanged += (s, e) => layoutCards();
             layoutCards();
             RefreshView();
+            if (AppData.UsesSupabase)
+            {
+                syncStatusTimer.Tick += (sender, args) => dataPath.Text = AppData.SupabaseStatus;
+                syncStatusTimer.Start();
+            }
+        }
+
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) syncStatusTimer.Dispose();
+            base.Dispose(disposing);
         }
 
         public void RefreshView()
@@ -160,11 +172,11 @@ namespace EdenPOS
             store.Text = settings.StoreName;
             employee.Text = AppSession.UserName + " — " + AppSession.RoleName;
             currency.Text = settings.CurrencySymbol;
-            dataPath.Text = AppData.UsesSupabase ? "PostgreSQL · Supabase" : AppData.DataDirectory;
+            dataPath.Text = AppData.UsesSupabase ? AppData.SupabaseStatus : AppData.DataDirectory;
             portableButton.Text = AppData.IsPortableMode ? "DESACTIVAR PORTABLE" : "ACTIVAR PORTABLE";
             portableButton.Enabled = !AppData.UsesSupabase;
             storageMode.Text = AppData.UsesSupabase
-                ? "Supabase guarda los datos operativos. Las imágenes personalizadas y el token de DNI se conservan en este equipo."
+                ? "EdenPOS guarda los cambios en este equipo y los sincroniza con Supabase cuando el servidor está disponible."
                 : AppData.IsPortableMode
                 ? "Modo portable activo: datos e imágenes viajan junto al ejecutable. El token DNI debe configurarse nuevamente en otra cuenta de Windows."
                 : "Modo local: datos protegidos en el perfil de Windows. Use Exportar/Importar para trasladarlos a otra computadora.";

@@ -52,7 +52,11 @@ En la carpeta `Ejecutable`, abre `Configurar Supabase.cmd` una vez con tu cuenta
 1. Introduce la contraseña de PostgreSQL de [Database Settings](https://supabase.com/dashboard/project/qnnfetkrqaaotkqsfivp/database/settings). Si no la conservaste, el botón **Reset password** te permite asignar otra.
 2. En la primera caja, marca **Cargar los datos locales de esta caja si la base está vacía** para importar el catálogo, los usuarios, los clientes, el inventario y el historial de ventas y caja. Usa la caja que tenga los datos vigentes. Las cajas siguientes leerán la base ya inicializada.
 3. Pulsa **Conectar**. El asistente crea un usuario de PostgreSQL para esa caja con acceso a las tablas de EdenPOS. Windows protege su credencial en el perfil de esa cuenta. Las aperturas posteriores de `EdenPOS.exe` usan la conexión guardada.
-4. En **Configuración** debe aparecer **PostgreSQL · Supabase**.
+4. En **Configuración** se muestra el estado de sincronización. Cuando todos los cambios se hayan enviado, aparecerá **Supabase al día**.
+
+La primera activación requiere acceso a Supabase. A partir de ese momento, EdenPOS guarda los cambios en una copia cifrada de este equipo y puede seguir registrando ventas durante una caída de internet. Mientras la aplicación esté abierta, intenta sincronizar al guardar y reintenta cada 15 segundos. Los cambios pendientes se conservan al cerrar el programa y se vuelven a intentar al abrirlo.
+
+Si otra caja modifica la base mientras esta tiene cambios pendientes, EdenPOS muestra un conflicto y conserva la copia local para evitar sobrescribir datos. Revise ese estado en **Configuración** antes de continuar con la conciliación.
 
 La conexión verifica el certificado del Session pooler. El importador escribe los datos en las tablas del esquema `edenpos` en una transacción. Los archivos JSON originales siguen en la carpeta de datos. Las imágenes personalizadas y el token de consulta de DNI son locales por equipo. En modo Supabase, la opción de exportar crea una copia de los datos PostgreSQL. La restauración se administra en Supabase.
 

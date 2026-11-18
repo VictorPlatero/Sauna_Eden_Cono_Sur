@@ -26,18 +26,26 @@ namespace EdenPOS
             internal CatalogVersion(string contents) { Contents = contents; }
         }
 
-        private static SupabaseStore cloud;
-        [ThreadStatic] private static SupabaseStore.Session cloudSession;
+        private static SupabaseSync cloud;
+        [ThreadStatic] private static SupabaseSync.Operation cloudSession;
 
         internal static bool UsesSupabase { get { return cloud != null; } }
+        internal static string SupabaseStatus { get { return cloud?.Status; } }
+
+        internal static void CloseSupabase()
+        {
+            var sync = cloud;
+            cloud = null;
+            sync?.Dispose();
+        }
 
         private sealed class CloudOperation : IDisposable
         {
-            private readonly SupabaseStore.Session session;
+            private readonly SupabaseSync.Operation session;
 
-            internal CloudOperation(bool write)
+            internal CloudOperation()
             {
-                session = cloud.Open(write);
+                session = cloud.Begin();
                 cloudSession = session;
             }
 
@@ -49,9 +57,9 @@ namespace EdenPOS
             }
         }
 
-        private static CloudOperation BeginCloudOperation(bool write = true)
+        private static CloudOperation BeginCloudOperation()
         {
-            return cloud == null || cloudSession != null ? null : new CloudOperation(write);
+            return cloud == null || cloudSession != null ? null : new CloudOperation();
         }
 
         private static void CommitCloudOperation()
@@ -102,10 +110,10 @@ namespace EdenPOS
         public static void Initialize()
         {
             Directory.CreateDirectory(DataDirectory);
-            cloud = SupabaseStore.FromConfiguration();
-            if (cloud != null)
+            var store = SupabaseStore.FromConfiguration();
+            if (store != null)
             {
-                InitializeCloud(Environment.GetEnvironmentVariable("EDENPOS_IMPORT_LOCAL") == "1");
+                InitializeCloud(store, Environment.GetEnvironmentVariable("EDENPOS_IMPORT_LOCAL") == "1");
                 return;
             }
             if (!File.Exists(PathFor("settings"))) Save("settings", CreateDefaultSettings());
@@ -122,42 +130,45 @@ namespace EdenPOS
         internal static void InitializeSupabase(string connectionString, bool import)
         {
             Directory.CreateDirectory(DataDirectory);
-            cloud = new SupabaseStore(connectionString);
-            try { InitializeCloud(import); }
+            InitializeCloud(new SupabaseStore(connectionString), import);
+        }
+
+        private static void InitializeCloud(SupabaseStore store, bool import)
+        {
+            cloud = new SupabaseSync(store, DataDirectory, () => ReadInitialData(import));
+            try
+            {
+                using (BeginCloudOperation())
+                {
+                    MigrateDefaults();
+                    CommitCloudOperation();
+                }
+                cloud.Start();
+            }
             catch
             {
+                cloud.Dispose();
                 cloud = null;
                 throw;
             }
         }
 
-        private static void InitializeCloud(bool import)
+        private static Dictionary<string, string> ReadInitialData(bool import)
         {
-            using (BeginCloudOperation())
-            {
-                if (!cloudSession.HasSettings()) SeedCloudDatabase(import);
-                MigrateDefaults();
-                CommitCloudOperation();
-            }
-        }
-
-        private static void SeedCloudDatabase(bool import)
-        {
-            if (cloudSession.HasBusinessData())
-                throw new InvalidOperationException("La base contiene datos sin configuración. Revise la instalación de EdenPOS en Supabase.");
             if (!import)
                 throw new InvalidOperationException("La base está vacía. Autorice la carga inicial de los archivos locales en la configuración de Supabase.");
 
-            var localSettings = ReadSeed("settings", CreateDefaultSettings);
-            localSettings.DniApiTokenProtected = "";
-            Save("settings", localSettings);
-            Save("catalog", ReadSeed("catalog", CreateDefaultProducts));
-            Save("customers", ReadSeed("customers", () => new List<Customer>()));
-            Save("shifts", ReadSeed("shifts", () => new List<Shift>()));
-            Save("receipts", ReadSeed("receipts", () => new List<Receipt>()));
-            Save("saved_tickets", ReadSeed("saved_tickets", () => new List<SavedTicket>()));
-            Save("cash_movements", ReadSeed("cash_movements", () => new List<CashMovement>()));
-            Save("inventory_movements", ReadSeed("inventory_movements", () => new List<InventoryMovement>()));
+            return new Dictionary<string, string>
+            {
+                ["settings"] = SupabaseStore.Serialize(ReadSeed("settings", CreateDefaultSettings)),
+                ["catalog"] = SupabaseStore.Serialize(ReadSeed("catalog", CreateDefaultProducts)),
+                ["customers"] = SupabaseStore.Serialize(ReadSeed("customers", () => new List<Customer>())),
+                ["shifts"] = SupabaseStore.Serialize(ReadSeed("shifts", () => new List<Shift>())),
+                ["receipts"] = SupabaseStore.Serialize(ReadSeed("receipts", () => new List<Receipt>())),
+                ["saved_tickets"] = SupabaseStore.Serialize(ReadSeed("saved_tickets", () => new List<SavedTicket>())),
+                ["cash_movements"] = SupabaseStore.Serialize(ReadSeed("cash_movements", () => new List<CashMovement>())),
+                ["inventory_movements"] = SupabaseStore.Serialize(ReadSeed("inventory_movements", () => new List<InventoryMovement>()))
+            };
         }
 
         private static T ReadSeed<T>(string name, Func<T> fallback)
@@ -925,7 +936,7 @@ namespace EdenPOS
         {
             if (string.IsNullOrWhiteSpace(destinationPath)) throw new ArgumentException("Seleccione un archivo de destino.");
             if (cloud == null) Initialize();
-            using var snapshot = BeginCloudOperation(false);
+            using var snapshot = BeginCloudOperation();
             var destination = Path.GetFullPath(destinationPath);
             var dataRoot = Path.GetFullPath(DataDirectory).TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar;
             if (destination.StartsWith(dataRoot, StringComparison.OrdinalIgnoreCase))
@@ -941,6 +952,7 @@ namespace EdenPOS
                         relative.Equals("errors.log", StringComparison.OrdinalIgnoreCase) ||
                         relative.EndsWith(".tmp", StringComparison.OrdinalIgnoreCase) ||
                         relative.Equals("dni-token.protected", StringComparison.OrdinalIgnoreCase) ||
+                        relative.StartsWith("supabase-cache.protected", StringComparison.OrdinalIgnoreCase) ||
                         (cloud != null && !relative.StartsWith("Images/", StringComparison.OrdinalIgnoreCase))) continue;
                     archive.CreateEntryFromFile(source, relative, CompressionLevel.Optimal);
                 }
@@ -1058,7 +1070,7 @@ namespace EdenPOS
         {
             if (cloud != null)
             {
-                using (BeginCloudOperation(false))
+                using (BeginCloudOperation())
                     return cloudSession.Read<T>(name);
             }
 

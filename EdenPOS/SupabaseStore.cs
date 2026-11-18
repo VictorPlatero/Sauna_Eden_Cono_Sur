@@ -21,6 +21,10 @@ namespace EdenPOS
 
         private readonly NpgsqlDataSource dataSource;
 
+        internal string DatabaseIdentity { get; }
+        internal static string Serialize<T>(T value) { return JsonSerializer.Serialize(value, JsonOptions); }
+        internal static T Deserialize<T>(string value) { return JsonSerializer.Deserialize<T>(value, JsonOptions); }
+
         internal SupabaseStore(string value)
         {
             var settings = new NpgsqlConnectionStringBuilder(value)
@@ -33,6 +37,9 @@ namespace EdenPOS
             };
             if (string.IsNullOrWhiteSpace(settings.Host) || string.IsNullOrWhiteSpace(settings.Username))
                 throw new InvalidOperationException("Configure el servidor y usuario de PostgreSQL para EdenPOS.");
+            // Supavisor routes pooled connections by the project suffix in the login.
+            var route = settings.Username.Split('.').Last();
+            DatabaseIdentity = SupabaseSync.Hash(string.Join("|", settings.Host, settings.Port, settings.Database, route));
             dataSource = CreateDataSource(settings);
         }
 
@@ -123,21 +130,27 @@ namespace EdenPOS
                     return (bool)command.ExecuteScalar();
             }
 
-            internal T Read<T>(string family)
+            internal Dictionary<string, string> ReadSnapshot(IEnumerable<string> families)
             {
-                var table = Tables[family];
-                using (var command = Command(table.ReadSql))
+                var names = families.ToArray();
+                var queries = names.Select(name => "(" + Tables[name].ReadSql + ")");
+                var result = new Dictionary<string, string>(names.Length);
+                using (var command = Command("select " + string.Join(", ", queries)))
+                using (var reader = command.ExecuteReader())
                 {
-                    var payload = command.ExecuteScalar() as string;
-                    if (payload == null) throw new InvalidOperationException("La base de EdenPOS todavía no está inicializada.");
-                    return JsonSerializer.Deserialize<T>(payload, JsonOptions);
+                    if (!reader.Read()) throw new InvalidOperationException("No se pudo leer el estado de EdenPOS.");
+                    for (var i = 0; i < names.Length; i++)
+                    {
+                        if (reader.IsDBNull(i)) throw new InvalidOperationException("La base de EdenPOS todavía no está inicializada.");
+                        result.Add(names[i], reader.GetString(i));
+                    }
                 }
+                return result;
             }
 
-            internal void Write<T>(string family, T value)
+            internal void WriteJson(string family, string json)
             {
                 var table = Tables[family];
-                var json = JsonSerializer.Serialize(value, JsonOptions);
                 if (family == "settings") json = "[" + json + "]";
                 using (var batch = new NpgsqlBatch(connection, transaction))
                 {

@@ -20,3 +20,4 @@ EdenPOS/Base de datos/*
 supabase.protected
 dni-token.protected
 *.pending
+supabase-cache.protected*

@@ -144,6 +144,7 @@ namespace EdenPOS
         public int NextReceiptNumber { get; set; }
         public int NextShiftNumber { get; set; }
         public bool DniLookupEnabled { get; set; }
+        [System.Text.Json.Serialization.JsonIgnore]
         public string DniApiTokenProtected { get; set; }
         public int InventorySchemaVersion { get; set; }
         public int CatalogSchemaVersion { get; set; }
