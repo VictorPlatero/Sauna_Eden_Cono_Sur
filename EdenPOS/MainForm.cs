@@ -92,16 +92,17 @@ namespace EdenPOS
                 Padding = new Padding(10, 6, 10, 8)
             };
             footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-            footer.RowStyles.Add(new RowStyle(SizeType.Absolute, 30f));
+            footer.RowStyles.Add(new RowStyle(SizeType.Absolute, 50f));
             footer.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
-            footer.Controls.Add(new Label
+            var syncStatus = new Label
             {
-                Text = "EDÉN POS  •  v2.3.1",
+                Text = AppData.SupabaseStatus ?? "Modo local · Supabase sin activar",
                 Dock = DockStyle.Fill,
                 TextAlign = ContentAlignment.MiddleCenter,
                 ForeColor = Theme.Muted,
                 Font = Theme.Small
-            }, 0, 0);
+            };
+            footer.Controls.Add(syncStatus, 0, 0);
             var logout = Theme.Button("CERRAR SESIÓN");
             logout.Dock = DockStyle.Fill;
             logout.Margin = new Padding(4);
@@ -157,6 +158,7 @@ namespace EdenPOS
                 var liveRefresh = new Timer { Interval = 300 };
                 liveRefresh.Tick += (s, e) =>
                 {
+                    syncStatus.Text = AppData.SupabaseStatus;
                     if (Form.ActiveForm != this || currentKey == "settings") return;
                     var revision = AppData.SupabaseRevision;
                     if (revision == displayedRevision) return;

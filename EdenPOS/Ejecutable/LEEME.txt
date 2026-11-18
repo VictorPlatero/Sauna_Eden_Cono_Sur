@@ -47,14 +47,14 @@ La compilación usa **Any CPU**, por lo que funciona como aplicación de 32 bits
 
 ## Conectar el ejecutable a Supabase
 
-En la carpeta `Ejecutable`, abre `Configurar Supabase.cmd` una vez con tu cuenta de Windows. El asistente apunta al proyecto EdenPOS de VictorPlatero’s Org y usa el certificado CA de Supabase incluido en `Assets`.
+Abre `EdenPOS.exe` desde `Ejecutable`. El programa muestra la activación cuando la cuenta de Windows aún no tiene una conexión. También puedes abrir `Configurar Supabase.cmd`. El asistente apunta al proyecto EdenPOS de VictorPlatero’s Org y usa el certificado CA de Supabase incluido en `Assets`.
 
 1. Introduce la contraseña de PostgreSQL de [Database Settings](https://supabase.com/dashboard/project/qnnfetkrqaaotkqsfivp/database/settings). Si no la conservaste, el botón **Reset password** te permite asignar otra.
 2. En la primera caja, marca **Cargar los datos locales de esta caja si la base está vacía** para importar el catálogo, los usuarios, los clientes, el inventario y el historial de ventas y caja. Usa la caja que tenga los datos vigentes. Las cajas siguientes leerán la base ya inicializada.
 3. Pulsa **Conectar**. El asistente crea un usuario de PostgreSQL para esa caja con acceso a las tablas de EdenPOS. Windows protege su credencial en el perfil de esa cuenta. Las aperturas posteriores de `EdenPOS.exe` usan la conexión guardada.
 4. En **Configuración** se muestra el estado de sincronización. Cuando todos los cambios se hayan enviado, aparecerá **Supabase al día**.
 
-La primera activación requiere acceso a Supabase. A partir de ese momento, EdenPOS guarda los cambios en una copia cifrada de este equipo y puede seguir registrando ventas durante una caída de internet. Mientras la aplicación esté abierta, intenta sincronizar al guardar y reintenta cada 15 segundos. Los cambios pendientes se conservan al cerrar el programa y se vuelven a intentar al abrirlo. PostgreSQL avisa a EdenPOS cuando se confirman cambios en otra caja. La pantalla operativa activa se actualiza automáticamente. La migración `004_notificaciones.sql` instala los avisos y el sondeo periódico cubre las desconexiones.
+La primera activación requiere acceso a Supabase. Con la conexión disponible, EdenPOS guarda automáticamente cada operación en PostgreSQL al confirmarla. Si no puede confirmar la escritura de inmediato, conserva la operación en una copia cifrada, indica su estado y reintenta automáticamente cada 15 segundos mientras esté abierto. Los cambios pendientes se conservan al cerrar el programa y se vuelven a intentar al abrirlo. PostgreSQL avisa a EdenPOS cuando se confirman cambios en otra caja. La pantalla operativa activa se actualiza automáticamente. La migración `004_notificaciones.sql` instala los avisos y el sondeo periódico cubre las desconexiones.
 
 Si otra caja modifica la base mientras esta tiene cambios pendientes, EdenPOS muestra un conflicto y conserva la copia local para evitar sobrescribir datos. Revise ese estado en **Configuración** antes de continuar con la conciliación.
 

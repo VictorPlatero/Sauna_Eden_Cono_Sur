@@ -245,6 +245,15 @@ namespace EdenPOS
                 Font = new Font("Segoe UI", 12f),
                 ForeColor = Theme.Muted
             });
+            Controls.Add(new Label
+            {
+                Text = AppData.SupabaseStatus ?? "Guardado en este equipo · Supabase sin activar",
+                Location = new Point(20, 252),
+                Size = new Size(460, 38),
+                TextAlign = ContentAlignment.MiddleCenter,
+                Font = Theme.Small,
+                ForeColor = Theme.Muted
+            });
             var export = Theme.Button("GUARDAR RECIBO");
             export.SetBounds(48, 300, 190, 54);
             export.Click += (s, e) => ExportReceipt(receipt);

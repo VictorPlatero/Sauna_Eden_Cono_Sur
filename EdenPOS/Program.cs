@@ -19,11 +19,14 @@ namespace EdenPOS
 
             try
             {
-                if (Array.Exists(args, arg => arg == "--configurar-supabase"))
+                var setupRequested = Array.Exists(args, arg => arg == "--configurar-supabase");
+                var hasConnection = SupabaseSetup.HasConnection;
+                var connectedNow = !hasConnection && SupabaseSetup.Show(allowLocal: !setupRequested);
+                if (!connectedNow)
                 {
-                    if (!SupabaseSetup.Show()) return;
+                    if (setupRequested && !hasConnection) return;
+                    AppData.Initialize();
                 }
-                else AppData.Initialize();
                 Application.ThreadException += (s, e) =>
                 {
                     AppData.LogError(e.Exception, "Error no controlado de interfaz");

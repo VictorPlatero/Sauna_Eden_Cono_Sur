@@ -21,6 +21,7 @@ namespace EdenPOS
         private const int RetryIntervalMilliseconds = 15000;
         private static readonly byte[] Entropy = Encoding.UTF8.GetBytes("EdenPOS-Supabase-cache-v1");
         private readonly object gate = new object();
+        private readonly object publishing = new object();
         private readonly SupabaseStore store;
         private readonly string path;
         private readonly FileStream instanceLock;
@@ -29,9 +30,8 @@ namespace EdenPOS
         private readonly CancellationTokenSource stopListener = new CancellationTokenSource();
         private Task listener;
         private int remoteRevision;
-        private int syncing;
+        private DateTime nextDirectAttemptUtc;
         private volatile bool disposed;
-        private bool started;
         private string status = "Comprobando conexión con Supabase";
 
         public sealed class State
@@ -74,7 +74,7 @@ namespace EdenPOS
                             if (session.HasBusinessData())
                                 throw new InvalidOperationException("La base contiene datos sin la configuración de EdenPOS.");
                             var data = initialData();
-                            foreach (var family in Families) session.WriteJson(family, data[family]);
+                            session.WriteDocuments(Families.Select(family => new KeyValuePair<string, string>(family, data[family])));
                         }
                         var remote = ReadRemote(session);
                         session.Commit();
@@ -99,7 +99,6 @@ namespace EdenPOS
         {
             lock (gate)
             {
-                started = true;
                 listener = Task.Run(Listen);
                 timer.Change(0, RetryIntervalMilliseconds);
             }
@@ -160,7 +159,7 @@ namespace EdenPOS
             internal T Read<T>(string family) { return SupabaseStore.Deserialize<T>(data[family]); }
             internal void Write<T>(string family, T value) { data[family] = SupabaseStore.Serialize(value); }
 
-            internal void Commit()
+            internal bool Commit()
             {
                 var previous = sync.current;
                 if (Families.Any(family => previous.Data[family] != data[family]))
@@ -171,8 +170,9 @@ namespace EdenPOS
                         RemoteFingerprint = previous.RemoteFingerprint, Pending = previous.Pending
                     });
                     sync.status = "Cambios guardados en este equipo, pendientes de sincronizar";
-                    if (sync.started) sync.timer.Change(0, RetryIntervalMilliseconds);
+                    return true;
                 }
+                return false;
             }
 
             public void Dispose()
@@ -183,10 +183,20 @@ namespace EdenPOS
             }
         }
 
-        private void Synchronize()
+        internal void PublishSavedChanges()
+        {
+            lock (gate)
+            {
+                if (disposed || DateTime.UtcNow < nextDirectAttemptUtc) return;
+            }
+
+            Synchronize(direct: true);
+        }
+
+        private void Synchronize(bool direct = false)
         {
             if (disposed) return;
-            if (Interlocked.Exchange(ref syncing, 1) != 0)
+            if (!Monitor.TryEnter(publishing, direct ? 2000 : 0))
             {
                 RequestSync();
                 return;
@@ -194,9 +204,16 @@ namespace EdenPOS
             try
             {
                 State snapshot;
-                lock (gate) snapshot = current;
+                lock (gate)
+                {
+                    if (disposed || (direct && DateTime.UtcNow < nextDirectAttemptUtc)) return;
+                    snapshot = current;
+                }
                 var published = snapshot.Published;
                 var baseline = snapshot.RemoteFingerprint;
+                if (direct && snapshot.Pending == null &&
+                    Families.All(family => Hash(snapshot.Data[family]) == published[family])) return;
+
                 using (var session = store.Open(true))
                 {
                     var remote = ReadRemote(session);
@@ -225,6 +242,7 @@ namespace EdenPOS
                                 });
                                 Interlocked.Increment(ref remoteRevision);
                             }
+                            nextDirectAttemptUtc = DateTime.MinValue;
                             status = "Supabase al día";
                         }
                         return;
@@ -232,11 +250,15 @@ namespace EdenPOS
 
                     if (baseline != remoteHash)
                     {
-                        lock (gate) status = "Sincronización en conflicto: hay cambios en otra caja";
+                        lock (gate)
+                        {
+                            nextDirectAttemptUtc = DateTime.UtcNow.AddMilliseconds(RetryIntervalMilliseconds);
+                            status = "Sincronización en conflicto: hay cambios en otra caja";
+                        }
                         return;
                     }
 
-                    foreach (var family in changed) session.WriteJson(family, snapshot.Data[family]);
+                    session.WriteDocuments(changed.Select(family => new KeyValuePair<string, string>(family, snapshot.Data[family])));
                     var resultingHash = RemoteFingerprint(ReadRemote(session));
                     lock (gate)
                     {
@@ -258,6 +280,7 @@ namespace EdenPOS
                             Database = latest.Database, Data = latest.Data, Published = hashes,
                             RemoteFingerprint = resultingHash
                         });
+                        nextDirectAttemptUtc = DateTime.MinValue;
                         status = Families.All(family => latest.Data[family] == snapshot.Data[family])
                             ? "Supabase al día" : "Cambios guardados en este equipo, pendientes de sincronizar";
                     }
@@ -269,10 +292,11 @@ namespace EdenPOS
                 {
                     const string unavailable = "Supabase no disponible. EdenPOS volverá a intentarlo.";
                     if (status != unavailable) AppData.LogError(ex, "Sincronizar Supabase");
+                    nextDirectAttemptUtc = DateTime.UtcNow.AddMilliseconds(RetryIntervalMilliseconds);
                     status = unavailable;
                 }
             }
-            finally { Interlocked.Exchange(ref syncing, 0); }
+            finally { Monitor.Exit(publishing); }
         }
 
         private static Dictionary<string, string> ReadRemote(SupabaseStore.Session session)

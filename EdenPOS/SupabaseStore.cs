@@ -163,17 +163,19 @@ namespace EdenPOS
                 return result;
             }
 
-            internal void WriteJson(string family, string json)
+            internal void WriteDocuments(IEnumerable<KeyValuePair<string, string>> documents)
             {
-                var table = Tables[family];
-                if (family == "settings") json = "[" + json + "]";
                 using (var batch = new NpgsqlBatch(connection, transaction))
                 {
-                    foreach (var sql in table.WriteSql)
+                    foreach (var document in documents)
                     {
-                        var command = new NpgsqlBatchCommand(sql);
-                        command.Parameters.AddWithValue("payload", NpgsqlDbType.Jsonb, json);
-                        batch.BatchCommands.Add(command);
+                        var json = document.Key == "settings" ? "[" + document.Value + "]" : document.Value;
+                        foreach (var sql in Tables[document.Key].WriteSql)
+                        {
+                            var command = new NpgsqlBatchCommand(sql);
+                            command.Parameters.AddWithValue("payload", NpgsqlDbType.Jsonb, json);
+                            batch.BatchCommands.Add(command);
+                        }
                     }
                     batch.ExecuteNonQuery();
                 }

@@ -67,9 +67,10 @@ namespace EdenPOS
         {
             var session = cloudSession;
             if (session == null) return;
-            session.Commit();
+            var changed = session.Commit();
             cloudSession = null;
             session.Dispose();
+            if (changed) cloud.PublishSavedChanges();
         }
 
         public static string DataDirectory

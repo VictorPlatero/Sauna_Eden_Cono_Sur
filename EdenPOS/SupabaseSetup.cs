@@ -18,6 +18,10 @@ namespace EdenPOS
         private static readonly string ConfigPath = Path.Combine(DirectoryPath, "supabase.protected");
         private static readonly byte[] Entropy = Encoding.UTF8.GetBytes("EdenPOS-PostgreSQL-v1");
 
+        internal static bool HasConnection =>
+            File.Exists(ConfigPath) ||
+            !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("EDENPOS_POSTGRES_CONNECTION"));
+
         internal static string ReadConnection()
         {
             if (!File.Exists(ConfigPath)) return null;
@@ -25,22 +29,22 @@ namespace EdenPOS
             return Encoding.UTF8.GetString(ProtectedData.Unprotect(encrypted, Entropy, DataProtectionScope.CurrentUser));
         }
 
-        internal static bool Show()
+        internal static bool Show(bool allowLocal)
         {
             using (var dialog = new Form
             {
-                Text = "Configurar Supabase en Edén POS",
+                Text = "Activar el guardado automático de Edén POS",
                 StartPosition = FormStartPosition.CenterScreen,
                 AutoScaleMode = AutoScaleMode.Dpi,
                 FormBorderStyle = FormBorderStyle.FixedDialog,
-                ClientSize = new Size(560, 297),
+                ClientSize = new Size(560, 332),
                 MinimizeBox = false,
                 MaximizeBox = false
             })
             {
                 dialog.Controls.Add(new Label
                 {
-                    Text = "Conecta este equipo al proyecto EdenPOS en Supabase. Usa la contraseña de PostgreSQL para crear un usuario exclusivo para esta caja.",
+                    Text = "Activa Supabase una sola vez con la contraseña de PostgreSQL del proyecto EdenPOS. Después, las operaciones se sincronizan automáticamente.",
                     Location = new Point(18, 16), Size = new Size(520, 50)
                 });
                 dialog.Controls.Add(new Label { Text = "Contraseña de la base de datos", Location = new Point(18, 75), AutoSize = true });
@@ -66,12 +70,24 @@ namespace EdenPOS
                 dialog.Controls.Add(browse);
                 var import = new CheckBox
                 {
-                    Text = "Cargar los datos locales de esta caja si la base está vacía",
+                    Text = "Importar las ventas, clientes y demás datos locales si la base está vacía",
                     Location = new Point(18, 200), AutoSize = true
                 };
                 dialog.Controls.Add(import);
-                var connect = new Button { Text = "Conectar", Location = new Point(340, 251), Width = 92 };
-                var cancel = new Button { Text = "Cancelar", Location = new Point(441, 251), Width = 92, DialogResult = DialogResult.Cancel };
+                if (allowLocal)
+                {
+                    dialog.Controls.Add(new Label
+                    {
+                        Text = "Si continúas en modo local, las operaciones se guardarán solo en este equipo.",
+                        Location = new Point(18, 235), Size = new Size(520, 35)
+                    });
+                }
+                var connect = new Button { Text = "Activar Supabase", Location = new Point(241, 282), Size = new Size(136, 28) };
+                var cancel = new Button
+                {
+                    Text = allowLocal ? "Continuar en modo local" : "Cancelar",
+                    Location = new Point(386, 282), Size = new Size(148, 28), DialogResult = DialogResult.Cancel
+                };
                 connect.Click += (sender, args) =>
                 {
                     if (password.TextLength == 0 || !File.Exists(certificate.Text))
@@ -84,9 +100,17 @@ namespace EdenPOS
                     {
                         dialog.UseWaitCursor = true;
                         connect.Enabled = false;
+                        cancel.Enabled = false;
                         Configure(password.Text, certificate.Text, import.Checked);
                         password.Clear();
                         dialog.DialogResult = DialogResult.OK;
+                    }
+                    catch (PostgresException ex) when (ex.SqlState == "28P01")
+                    {
+                        MessageBox.Show(dialog, "La contraseña de PostgreSQL no es válida. Revísala e intenta de nuevo.",
+                            "No se pudo conectar a Supabase", MessageBoxButtons.OK, MessageBoxIcon.Error);
+                        password.SelectAll();
+                        password.Focus();
                     }
                     catch (Exception ex)
                     {
@@ -97,6 +121,7 @@ namespace EdenPOS
                     finally
                     {
                         connect.Enabled = true;
+                        cancel.Enabled = true;
                         dialog.UseWaitCursor = false;
                     }
                 };
