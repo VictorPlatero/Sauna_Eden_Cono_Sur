@@ -60,6 +60,8 @@ Si otra caja modifica la base mientras esta tiene cambios pendientes, EdenPOS mu
 
 La conexión verifica el certificado del Session pooler. El importador escribe los datos en las tablas del esquema `edenpos` en una transacción. Los archivos JSON originales siguen en la carpeta de datos. Las imágenes personalizadas y el token de consulta de DNI son locales por equipo. En modo Supabase, la opción de exportar crea una copia de los datos PostgreSQL. La restauración se administra en Supabase.
 
+En el editor SQL puedes consultar el esquema privado en español, por ejemplo con `select * from edenpos_es.ventas;`. Las vistas consultan las tablas operativas y se instalan con `003_vistas_en_espanol.sql`.
+
 Para otro proyecto, instala las migraciones `001_edenpos_supabase.sql` y `002_edenpos_desktop.sql`, en ese orden. Una instalación administrada puede configurar `EDENPOS_POSTGRES_CONNECTION` con una cadena Npgsql y el certificado CA correspondiente. Usa una cuenta PostgreSQL con acceso limitado al esquema `edenpos`.
 
 ## Primer inicio de sesión

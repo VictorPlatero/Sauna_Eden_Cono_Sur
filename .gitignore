@@ -21,3 +21,4 @@ supabase.protected
 dni-token.protected
 *.pending
 supabase-cache.protected*
+!EdenPOS/Base de datos/003_vistas_en_espanol.sql
